@@ -1,15 +1,68 @@
+# =============================================================================
+# Phone2PC — Android / Kotlin / Gradle .gitignore
+# =============================================================================
+
+# ---- Gradle ----
+.gradle/
+build/
+**/build/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+# ---- Android Studio / IntelliJ ----
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
+.idea/
+!.idea/codeStyles/
+!.idea/inspectionProfiles/
 /.idea/workspace.xml
-/.idea/navEditor.xml
+/.idea/tasks.xml
+/.idea/gradle.xml
 /.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+/.idea/dictionaries
+/.idea/libraries
+/.idea/caches
+/.idea/modules.xml
+/.idea/navEditor.xml
+/.idea/shelf
+
+# ---- Local machine config (NEVER commit) ----
 local.properties
+local.defaults.properties
+
+# ---- Build outputs ----
+/captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ---- Signing keystores (NEVER commit private keys) ----
+*.jks
+*.keystore
+release.properties
+keystore.properties
+
+# ---- Native / CMake build artifacts ----
+.externalNativeBuild/
+.cxx/
+*.so
+*.o
+
+# ---- OS-generated files ----
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---- Logs & temp ----
+*.log
+*.tmp
+*.temp
+/logs/
+
+# ---- Test results ----
+/test-results/
+
+# ---- Proguard ----
+/proguard/
