@@ -49,8 +49,14 @@ class FidoAdvertiser(private val context: Context) {
             .setTimeout(0) // Advertise indefinitely
             .build()
 
+        // CTAP2 Spec 6.3: FIDO BLE authenticators MUST include their FIDO BLE Service Data
+        // The service data is a 1-byte bitfield. 
+        // 0x00 means we are an authenticator.
+        val fidoServiceData = byteArrayOf(0x00)
+
         val data = AdvertiseData.Builder()
             .addServiceUuid(FidoBleUuids.SERVICE_PARCEL)
+            .addServiceData(FidoBleUuids.SERVICE_PARCEL, fidoServiceData)
             .setIncludeDeviceName(false) // Save advertisement space
             .build()
 

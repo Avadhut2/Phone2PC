@@ -34,10 +34,11 @@ class FidoGattServer(private val context: Context) {
     private var connectedDevice: BluetoothDevice? = null
     private var statusCharacteristic: BluetoothGattCharacteristic? = null
     private val framer = BleFramer()
+    private var currentMtu = 20 // Default MTU minus 3 bytes overhead is 20 for GATT. We use 20 for fragment logic.
 
     /**
-     * Callback invoked when a complete FIDO message has been reassembled.
-     * Set this before calling [start]. The ByteArray is CMD + full payload.
+     * Callback invoked when a complete FIDO CTAP message has been received.
+     * The ByteArray is the pure CTAP payload (e.g., [0x01, ...CBOR...]).
      */
     var onMessageReceived: ((ByteArray) -> Unit)? = null
 
@@ -62,14 +63,18 @@ class FidoGattServer(private val context: Context) {
         Log.i(TAG, "FIDO GATT server started")
     }
 
-    /** Send a FIDO response back to the connected device via notifications. */
-    fun sendResponse(data: ByteArray) {
+    /** Send a BLE response back to the connected device. */
+    fun sendResponse(cmd: Byte, data: ByteArray) {
         val server = gattServer ?: return
         val device = connectedDevice ?: return
         val characteristic = statusCharacteristic ?: return
 
-        val mtu = 20 // Conservative default; updated on MTU negotiation
-        val frames = framer.fragment(data[0], data.copyOfRange(1, data.size), mtu)
+        // MTU negotiated by Android includes 3 bytes of GATT overhead.
+        // The fragment method expects the total available payload size per packet.
+        // We use currentMtu - 3 (standard GATT header size)
+        val payloadCapacity = if (currentMtu > 23) currentMtu - 3 else 20
+        
+        val frames = framer.fragment(cmd, data, payloadCapacity)
 
         for (frame in frames) {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -89,6 +94,7 @@ class FidoGattServer(private val context: Context) {
         framer.reset()
         gattServer?.close()
         gattServer = null
+        currentMtu = 20
         Log.i(TAG, "FIDO GATT server stopped")
     }
 
@@ -99,10 +105,11 @@ class FidoGattServer(private val context: Context) {
         )
 
         // fidoControlPoint — Write (client sends CTAP2 commands here)
+        // CTAP2 Spec: Must enforce encrypted link
         val controlPoint = BluetoothGattCharacteristic(
             FidoBleUuids.CONTROL_POINT,
             BluetoothGattCharacteristic.PROPERTY_WRITE,
-            BluetoothGattCharacteristic.PERMISSION_WRITE
+            BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED
         )
         service.addCharacteristic(controlPoint)
 
@@ -114,7 +121,7 @@ class FidoGattServer(private val context: Context) {
         )
         val cccDescriptor = BluetoothGattDescriptor(
             FidoBleUuids.CCC_DESCRIPTOR,
-            BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
+            BluetoothGattDescriptor.PERMISSION_READ_ENCRYPTED or BluetoothGattDescriptor.PERMISSION_WRITE_ENCRYPTED
         )
         status.addDescriptor(cccDescriptor)
         service.addCharacteristic(status)
@@ -124,7 +131,7 @@ class FidoGattServer(private val context: Context) {
         val controlPointLength = BluetoothGattCharacteristic(
             FidoBleUuids.CONTROL_POINT_LENGTH,
             BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ
+            BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED
         )
         service.addCharacteristic(controlPointLength)
 
@@ -132,7 +139,7 @@ class FidoGattServer(private val context: Context) {
         val serviceRevision = BluetoothGattCharacteristic(
             FidoBleUuids.SERVICE_REVISION_BITFIELD,
             BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE,
-            BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE
+            BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED or BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED
         )
         service.addCharacteristic(serviceRevision)
 
@@ -145,14 +152,22 @@ class FidoGattServer(private val context: Context) {
             if (newState == BluetoothGatt.STATE_CONNECTED) {
                 connectedDevice = device
                 framer.reset()
+                currentMtu = 20
                 Log.i(TAG, "Device connected")
                 onConnectionStateChanged?.invoke(true)
             } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
                 connectedDevice = null
                 framer.reset()
+                currentMtu = 20
                 Log.i(TAG, "Device disconnected")
                 onConnectionStateChanged?.invoke(false)
             }
+        }
+
+        override fun onMtuChanged(device: BluetoothDevice?, mtu: Int) {
+            super.onMtuChanged(device, mtu)
+            Log.i(TAG, "MTU changed to $mtu")
+            currentMtu = mtu
         }
 
         override fun onCharacteristicWriteRequest(
@@ -173,7 +188,29 @@ class FidoGattServer(private val context: Context) {
                 try {
                     val completeMessage = framer.accumulate(value)
                     if (completeMessage != null) {
-                        onMessageReceived?.invoke(completeMessage)
+                        val cmd = completeMessage[0]
+                        val payload = completeMessage.copyOfRange(1, completeMessage.size)
+                        
+                        when (cmd) {
+                            0x83.toByte() -> { // MSG (CTAP request)
+                                onMessageReceived?.invoke(payload)
+                            }
+                            0x81.toByte() -> { // PING
+                                sendResponse(0x81.toByte(), payload)
+                            }
+                            0x82.toByte() -> { // KEEPALIVE
+                                // Ignore or handle keepalive logic
+                            }
+                            0x84.toByte() -> { // CANCEL
+                                Log.i(TAG, "Received CANCEL command")
+                                // If we were processing something, we should ideally cancel it.
+                                // For now, we drop it.
+                            }
+                            else -> {
+                                Log.w(TAG, "Received unknown FIDO BLE cmd: $cmd")
+                                sendResponse(0xBF.toByte(), byteArrayOf(0x01)) // ERROR: invalid cmd
+                            }
+                        }
                     }
                 } catch (e: IllegalArgumentException) {
                     Log.w(TAG, "Malformed BLE frame rejected: ${e.message}")

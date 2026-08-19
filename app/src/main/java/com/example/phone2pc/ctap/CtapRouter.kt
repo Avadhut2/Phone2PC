@@ -146,22 +146,15 @@ class CtapRouter(
             cosePublicKey = cosePublicKey
         )
 
-        // --- Build attestation object (fmt: "none") ---
-        val attestationObject = CborEncoder()
-            .encodeMapStart(3)
-            .encodeTextString("fmt")
-            .encodeTextString("none")
-            .encodeTextString("attStmt")
-            .encodeMapStart(0)
-            .encodeTextString("authData")
-            .encodeByteString(authData)
-            .toByteArray()
-
         // --- Build CTAP2 response: {1: fmt, 2: authData, 3: attStmt} ---
         val responseCbor = CborEncoder()
-            .encodeMapStart(1)
-            .encodeUnsignedInt(1)  // Response key 1 = attestationObject
-            .encodeByteString(attestationObject)
+            .encodeMapStart(3)
+            .encodeUnsignedInt(1)
+            .encodeTextString("none")
+            .encodeUnsignedInt(2)
+            .encodeByteString(authData)
+            .encodeUnsignedInt(3)
+            .encodeMapStart(0) // Empty attStmt for "none"
             .toByteArray()
 
         // --- Persist credential mapping ---
@@ -214,10 +207,24 @@ class CtapRouter(
         val store = credentialStore
             ?: return CtapErrorCode.ERR_OTHER.toResponse()
 
-        val credentials = store.findByRpId(rpId)
+        var credentials = store.findByRpId(rpId)
         if (credentials.isEmpty()) {
             return CtapErrorCode.ERR_NO_CREDENTIALS.toResponse()
         }
+
+        // 3: allowList (optional, array of PublicKeyCredentialDescriptor)
+        @Suppress("UNCHECKED_CAST")
+        val allowList = params[3] as? List<Map<Any?, Any?>>
+        if (allowList != null) {
+            val allowedIds = allowList.mapNotNull { it["id"] as? ByteArray }
+            credentials = credentials.filter { cred ->
+                allowedIds.any { allowedId -> allowedId.contentEquals(cred.credentialId) }
+            }
+            if (credentials.isEmpty()) {
+                return CtapErrorCode.ERR_NO_CREDENTIALS.toResponse()
+            }
+        }
+
         val credential = credentials.first()
 
         // --- Biometric authentication + signing ---

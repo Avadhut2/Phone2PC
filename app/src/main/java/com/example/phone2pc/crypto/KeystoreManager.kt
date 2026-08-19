@@ -38,7 +38,7 @@ class KeystoreManager {
      * @return     The key alias used to reference this credential.
      */
     fun generateKeyPair(rpId: String): String {
-        val alias = "fido_credential_$rpId"
+        val alias = "fido_credential_${java.util.UUID.randomUUID()}"
         
         val keyPairGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM, KEYSTORE_PROVIDER)
         
