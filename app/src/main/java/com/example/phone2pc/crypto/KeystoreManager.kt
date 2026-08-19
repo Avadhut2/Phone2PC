@@ -38,13 +38,35 @@ class KeystoreManager {
      * @return     The key alias used to reference this credential.
      */
     fun generateKeyPair(rpId: String): String {
-        // TODO(Phase 2): Build KeyGenParameterSpec with:
-        //   - setUserAuthenticationRequired(true)
-        //   - setInvalidatedByBiometricEnrollment(true)
-        //   - setIsStrongBoxBacked(true) with fallback to TEE
-        //   - ECGenParameterSpec("secp256r1")
-        //   - KeyProperties.PURPOSE_SIGN
-        return rpId  // placeholder — returns alias
+        val alias = "fido_credential_$rpId"
+        
+        val keyPairGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM, KEYSTORE_PROVIDER)
+        
+        val builder = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
+            .setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec(KEY_CURVE))
+            .setDigests(KeyProperties.DIGEST_SHA256)
+            .setUserAuthenticationRequired(true)
+            .setInvalidatedByBiometricEnrollment(true)
+            
+        try {
+            android.util.Log.i("KeystoreManager", "Attempting StrongBox key generation for: $alias")
+            builder.setIsStrongBoxBacked(true)
+            keyPairGenerator.initialize(builder.build())
+            keyPairGenerator.generateKeyPair()
+        } catch (e: Exception) {
+            android.util.Log.w("KeystoreManager", "StrongBox failed or unavailable. Falling back to standard TEE.", e)
+            // Rebuild without StrongBox
+            val fallbackBuilder = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
+                .setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec(KEY_CURVE))
+                .setDigests(KeyProperties.DIGEST_SHA256)
+                .setUserAuthenticationRequired(true)
+                .setInvalidatedByBiometricEnrollment(true)
+            
+            keyPairGenerator.initialize(fallbackBuilder.build())
+            keyPairGenerator.generateKeyPair()
+        }
+        
+        return alias
     }
 
     /**
@@ -68,8 +90,43 @@ class KeystoreManager {
      * so they can be included in the attestation object sent to Windows.
      */
     fun getPublicKeyCose(keyAlias: String): ByteArray {
-        // TODO(Phase 2): Load public key from Keystore and encode as COSE Key (RFC 8152).
-        return ByteArray(0)
+        val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+        val cert = keyStore.getCertificate(keyAlias)
+            ?: throw IllegalStateException("Certificate not found for alias: $keyAlias")
+            
+        val publicKey = cert.publicKey as? java.security.interfaces.ECPublicKey
+            ?: throw IllegalStateException("Public key is not ECDSA")
+            
+        val x = to32ByteArray(publicKey.w.affineX)
+        val y = to32ByteArray(publicKey.w.affineY)
+        
+        // COSE Key formatting for EC2 secp256r1
+        return com.example.phone2pc.ctap.CborEncoder()
+            .encodeMapStart(5)
+            .encodeUnsignedInt(1) // kty (1)
+            .encodeUnsignedInt(2) // EC2 (2)
+            .encodeUnsignedInt(3) // alg (3)
+            .encodeNegativeInt(-7) // ES256 (-7)
+            .encodeNegativeInt(-1) // crv (-1)
+            .encodeUnsignedInt(1) // P-256 (1)
+            .encodeNegativeInt(-2) // x (-2)
+            .encodeByteString(x)
+            .encodeNegativeInt(-3) // y (-3)
+            .encodeByteString(y)
+            .toByteArray()
+    }
+    
+    private fun to32ByteArray(value: java.math.BigInteger): ByteArray {
+        val bytes = value.toByteArray()
+        return when {
+            bytes.size == 32 -> bytes
+            bytes.size > 32 -> bytes.copyOfRange(bytes.size - 32, bytes.size)
+            else -> {
+                val padded = ByteArray(32)
+                System.arraycopy(bytes, 0, padded, 32 - bytes.size, bytes.size)
+                padded
+            }
+        }
     }
 
     /**

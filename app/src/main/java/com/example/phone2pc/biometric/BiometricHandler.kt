@@ -1,9 +1,11 @@
 package com.example.phone2pc.biometric
 
-import android.content.Context
 import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import java.security.Signature
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 /**
  * BiometricHandler
@@ -19,25 +21,62 @@ import java.security.Signature
  *
  * Phase: 2 — Biometrics & Keystore Integration
  */
-class BiometricHandler(private val context: Context) {
+class BiometricHandler {
 
     /**
-     * Display the biometric prompt to the user. On success, the [signature]
-     * inside the [CryptoObject] is unlocked and ready to sign data.
+     * Result of a biometric authentication attempt.
+     */
+    sealed class AuthResult {
+        /** Biometric verified. The [signature] inside CryptoObject is now unlocked. */
+        data class Success(val signature: Signature) : AuthResult()
+        /** User cancelled or biometric failed. */
+        data class Failure(val message: String) : AuthResult()
+    }
+
+    /**
+     * Display the biometric prompt and suspend until the user authenticates or cancels.
      *
      * @param activity   The foreground FragmentActivity to anchor the prompt to.
      * @param signature  An initialized [Signature] from [KeystoreManager.getSignatureForSigning].
-     * @param onSuccess  Called with the authenticated [BiometricPrompt.AuthenticationResult].
-     * @param onFailure  Called with a descriptive error message on cancellation or failure.
+     * @return [AuthResult.Success] with the unlocked Signature, or [AuthResult.Failure].
      */
-    fun authenticate(
+    suspend fun authenticate(
         activity: FragmentActivity,
-        signature: Signature,
-        onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,
-        onFailure: (String) -> Unit
-    ) {
-        // TODO(Phase 2): Build BiometricPrompt with CryptoObject(signature),
-        //                set title/subtitle/negativeButtonText,
-        //                handle AuthenticationCallback.
+        signature: Signature
+    ): AuthResult = suspendCoroutine { continuation ->
+
+        val executor = ContextCompat.getMainExecutor(activity)
+
+        val callback = object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                val authedSignature = result.cryptoObject?.signature
+                if (authedSignature != null) {
+                    continuation.resume(AuthResult.Success(authedSignature))
+                } else {
+                    continuation.resume(AuthResult.Failure("CryptoObject signature was null after auth"))
+                }
+            }
+
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                continuation.resume(AuthResult.Failure(errString.toString()))
+            }
+
+            override fun onAuthenticationFailed() {
+                // Called on a single failed attempt (e.g., wrong finger).
+                // The prompt stays open — Android handles retries automatically.
+                // We do NOT resume the coroutine here.
+            }
+        }
+
+        val prompt = BiometricPrompt(activity, executor, callback)
+
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Phone2PC Authentication")
+            .setSubtitle("Verify your identity to sign in")
+            .setNegativeButtonText("Cancel")
+            .build()
+
+        val cryptoObject = BiometricPrompt.CryptoObject(signature)
+        prompt.authenticate(promptInfo, cryptoObject)
     }
 }

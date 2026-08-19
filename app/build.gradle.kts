@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.example.phone2pc"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.phone2pc"
