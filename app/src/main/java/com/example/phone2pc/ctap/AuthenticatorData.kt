@@ -23,7 +23,7 @@ object AuthenticatorData {
     const val FLAG_UP: Byte = 0x01          // User Present
     const val FLAG_UV: Byte = 0x04          // User Verified
     const val FLAG_AT: Byte = 0x40          // Attested Credential Data included
-    // FLAG_ED = 0x80 (Extensions — not used yet)
+    const val FLAG_ED: Byte = 0x80.toByte() // Extension Data included
 
     /**
      * Build authenticatorData for an assertion (GetAssertion).
@@ -33,12 +33,16 @@ object AuthenticatorData {
         rpId: String,
         signCount: Int,
         userPresent: Boolean = true,
-        userVerified: Boolean = true
+        userVerified: Boolean = true,
+        extensions: ByteArray? = null
     ): ByteArray {
-        val out = ByteArrayOutputStream(37)
+        val out = ByteArrayOutputStream()
         out.write(hashRpId(rpId))
-        out.write(buildFlags(userPresent, userVerified, attestedData = false).toInt())
+        out.write(buildFlags(userPresent, userVerified, attestedData = false, hasExtensions = extensions != null).toInt())
         out.write(intToBigEndian(signCount))
+        if (extensions != null) {
+            out.write(extensions)
+        }
         return out.toByteArray()
     }
 
@@ -57,13 +61,14 @@ object AuthenticatorData {
         signCount: Int,
         aaguid: ByteArray,
         credentialId: ByteArray,
-        cosePublicKey: ByteArray
+        cosePublicKey: ByteArray,
+        extensions: ByteArray? = null
     ): ByteArray {
         require(aaguid.size == 16) { "AAGUID must be 16 bytes" }
 
         val out = ByteArrayOutputStream()
         out.write(hashRpId(rpId))
-        out.write(buildFlags(userPresent = true, userVerified = true, attestedData = true).toInt())
+        out.write(buildFlags(userPresent = true, userVerified = true, attestedData = true, hasExtensions = extensions != null).toInt())
         out.write(intToBigEndian(signCount))
 
         // Attested credential data
@@ -71,6 +76,10 @@ object AuthenticatorData {
         out.write(shortToBigEndian(credentialId.size))
         out.write(credentialId)
         out.write(cosePublicKey)
+        
+        if (extensions != null) {
+            out.write(extensions)
+        }
 
         return out.toByteArray()
     }
@@ -80,11 +89,12 @@ object AuthenticatorData {
         return MessageDigest.getInstance("SHA-256").digest(rpId.toByteArray(Charsets.UTF_8))
     }
 
-    private fun buildFlags(userPresent: Boolean, userVerified: Boolean, attestedData: Boolean): Byte {
+    private fun buildFlags(userPresent: Boolean, userVerified: Boolean, attestedData: Boolean, hasExtensions: Boolean): Byte {
         var flags = 0
         if (userPresent) flags = flags or FLAG_UP.toInt()
         if (userVerified) flags = flags or FLAG_UV.toInt()
         if (attestedData) flags = flags or FLAG_AT.toInt()
+        if (hasExtensions) flags = flags or FLAG_ED.toInt()
         return flags.toByte()
     }
 

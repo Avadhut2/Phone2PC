@@ -81,8 +81,8 @@ class MainActivity : AppCompatActivity() {
         // Initialize dependencies
         credentialStore = CredentialStore(this)
         
-        // Wire CtapRouter with BiometricHandler and CredentialStore
-        ctapRouter = CtapRouter(keystoreManager, credentialStore) { signature ->
+        // Wire CtapRouter with Context, BiometricHandler, and CredentialStore
+        ctapRouter = CtapRouter(this, keystoreManager, credentialStore) { signature ->
             // This lambda is called by CtapRouter when it needs biometric auth
             
             // FIDO Spec: Send KEEPALIVE (0x82) with UP_NEEDED (0x02) status periodically 

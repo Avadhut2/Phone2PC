@@ -14,7 +14,7 @@ import android.util.Base64
  *
  * Storage format per entry:
  *   Key:   Base64(credentialId)
- *   Value: rpId\nkeyAlias\nBase64(userHandle)\nsignCount
+ *   Value: rpId\nkeyAlias\nBase64(userHandle)\nsignCount\nBase64(userName)\nBase64(userDisplayName)
  *
  * Phase: 2 — CTAP2 Credential Management
  */
@@ -35,11 +35,22 @@ class CredentialStore(context: Context) {
             Base64.encodeToString(it, Base64.NO_WRAP)
         } ?: ""
 
+        val userNameB64 = credential.userName?.let {
+            Base64.encodeToString(it.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        } ?: ""
+        
+        val userDisplayNameB64 = credential.userDisplayName?.let {
+            Base64.encodeToString(it.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        } ?: ""
+
         val value = listOf(
             credential.rpId,
             credential.keyAlias,
             userHandleB64,
-            credential.createdAtEpoch.toString()
+            credential.createdAtEpoch.toString(),
+            userNameB64,
+            userDisplayNameB64,
+            credential.hasHmacSecret.toString()
         ).joinToString(FIELD_SEPARATOR)
 
         prefs.edit().putString(key, value).apply()
@@ -71,24 +82,45 @@ class CredentialStore(context: Context) {
         prefs.edit().clear().apply()
     }
 
-    private fun deserialize(keyB64: String, value: String): FidoCredential? {
-        val fields = value.split(FIELD_SEPARATOR)
-        if (fields.size < 4) return null
-
-        val credentialId = Base64.decode(keyB64, Base64.NO_WRAP)
-        val rpId = fields[0]
-        val keyAlias = fields[1]
-        val userHandle = if (fields[2].isNotEmpty()) {
-            Base64.decode(fields[2], Base64.NO_WRAP)
+    private fun deserialize(key: String, value: String): FidoCredential? {
+        val parts = value.split(FIELD_SEPARATOR)
+        if (parts.size < 4) return null
+        
+        val credentialId = try { Base64.decode(key, Base64.NO_WRAP) } catch (e: Exception) { return null }
+        val rpId = parts[0]
+        val keyAlias = parts[1]
+        val userHandle = if (parts[2].isNotEmpty()) {
+            try { Base64.decode(parts[2], Base64.NO_WRAP) } catch (e: Exception) { null }
         } else null
-        val createdAtEpoch = fields[3].toLongOrNull() ?: return null
+        val createdAt = parts[3].toLongOrNull() ?: 0L
+        
+        var userName: String? = null
+        var userDisplayName: String? = null
+        var hasHmacSecret = false
+        
+        if (parts.size >= 6) {
+            userName = if (parts[4].isNotEmpty()) {
+                try { String(Base64.decode(parts[4], Base64.NO_WRAP), Charsets.UTF_8) } catch (e: Exception) { null }
+            } else null
+            
+            userDisplayName = if (parts[5].isNotEmpty()) {
+                try { String(Base64.decode(parts[5], Base64.NO_WRAP), Charsets.UTF_8) } catch (e: Exception) { null }
+            } else null
+        }
+        
+        if (parts.size >= 7) {
+            hasHmacSecret = parts[6].toBoolean()
+        }
 
         return FidoCredential(
-            credentialId = credentialId,
-            rpId = rpId,
-            keyAlias = keyAlias,
+            credentialId = credentialId, 
+            rpId = rpId, 
+            keyAlias = keyAlias, 
             userHandle = userHandle,
-            createdAtEpoch = createdAtEpoch
+            userName = userName,
+            userDisplayName = userDisplayName,
+            hasHmacSecret = hasHmacSecret,
+            createdAtEpoch = createdAt
         )
     }
 }

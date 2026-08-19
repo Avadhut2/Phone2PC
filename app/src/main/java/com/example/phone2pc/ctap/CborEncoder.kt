@@ -64,6 +64,34 @@ class CborEncoder {
         return this
     }
 
+    fun encodeMap(map: Map<*, *>): CborEncoder {
+        encodeMapStart(map.size)
+        for ((key, value) in map) {
+            encodeAny(key)
+            encodeAny(value)
+        }
+        return this
+    }
+
+    private fun encodeAny(value: Any?) {
+        when (value) {
+            is Long -> {
+                if (value >= 0) encodeUnsignedInt(value)
+                else encodeNegativeInt(value)
+            }
+            is Int -> {
+                if (value >= 0) encodeUnsignedInt(value.toLong())
+                else encodeNegativeInt(value.toLong())
+            }
+            is ByteArray -> encodeByteString(value)
+            is String -> encodeTextString(value)
+            is Boolean -> encodeBoolean(value)
+            is Map<*, *> -> encodeMap(value)
+            null -> encodeNull()
+            else -> throw IllegalArgumentException("Unsupported CBOR type: ${value::class.java}")
+        }
+    }
+
     private fun writeTypeAndValue(majorType: Int, value: Long) {
         val major = majorType shl 5
         when {

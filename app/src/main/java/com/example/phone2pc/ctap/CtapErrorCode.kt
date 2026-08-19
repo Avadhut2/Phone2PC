@@ -42,6 +42,12 @@ enum class CtapErrorCode(val code: Byte) {
     ERR_NOT_ALLOWED        (0x30),
     ERR_PIN_INVALID        (0x31),
     ERR_PIN_BLOCKED        (0x32),
+    ERR_PIN_AUTH_INVALID   (0x33),
+    ERR_PIN_AUTH_BLOCKED   (0x34),
+    ERR_PIN_NOT_SET        (0x35),
+    ERR_PIN_REQUIRED       (0x36),
+    ERR_PIN_POLICY_VIOLATION(0x37),
+    ERR_PIN_TOKEN_EXPIRED  (0x38),
     ERR_OTHER              (0x7F);
 
     /**

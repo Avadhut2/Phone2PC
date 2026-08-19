@@ -5,6 +5,9 @@ import android.security.keystore.KeyProperties
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.Signature
+import javax.crypto.KeyGenerator
+import javax.crypto.Mac
+import javax.crypto.SecretKey
 
 /**
  * KeystoreManager
@@ -90,30 +93,70 @@ class KeystoreManager {
      * so they can be included in the attestation object sent to Windows.
      */
     fun getPublicKeyCose(keyAlias: String): ByteArray {
-        val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-        val cert = keyStore.getCertificate(keyAlias)
-            ?: throw IllegalStateException("Certificate not found for alias: $keyAlias")
-            
-        val publicKey = cert.publicKey as? java.security.interfaces.ECPublicKey
-            ?: throw IllegalStateException("Public key is not ECDSA")
-            
-        val x = to32ByteArray(publicKey.w.affineX)
-        val y = to32ByteArray(publicKey.w.affineY)
+        val ks = KeyStore.getInstance(KEYSTORE_PROVIDER)
+        ks.load(null)
+        val cert = ks.getCertificate(keyAlias)
         
-        // COSE Key formatting for EC2 secp256r1
-        return com.example.phone2pc.ctap.CborEncoder()
+        val ecKey = cert.publicKey as java.security.interfaces.ECPublicKey
+        val w = ecKey.w
+        
+        var xBytes = w.affineX.toByteArray()
+        if (xBytes.size > 32) xBytes = xBytes.copyOfRange(xBytes.size - 32, xBytes.size)
+        if (xBytes.size < 32) xBytes = ByteArray(32 - xBytes.size) + xBytes
+        
+        var yBytes = w.affineY.toByteArray()
+        if (yBytes.size > 32) yBytes = yBytes.copyOfRange(yBytes.size - 32, yBytes.size)
+        if (yBytes.size < 32) yBytes = ByteArray(32 - yBytes.size) + yBytes
+
+        val encoder = com.example.phone2pc.ctap.CborEncoder()
             .encodeMapStart(5)
-            .encodeUnsignedInt(1) // kty (1)
-            .encodeUnsignedInt(2) // EC2 (2)
-            .encodeUnsignedInt(3) // alg (3)
-            .encodeNegativeInt(-7) // ES256 (-7)
-            .encodeNegativeInt(-1) // crv (-1)
-            .encodeUnsignedInt(1) // P-256 (1)
-            .encodeNegativeInt(-2) // x (-2)
-            .encodeByteString(x)
-            .encodeNegativeInt(-3) // y (-3)
-            .encodeByteString(y)
-            .toByteArray()
+            .encodeUnsignedInt(1) // kty
+            .encodeUnsignedInt(2) // EC2
+            .encodeUnsignedInt(3) // alg
+            .encodeNegativeInt(-7) // ES256
+            .encodeNegativeInt(-1) // crv
+            .encodeUnsignedInt(1) // P-256
+            .encodeNegativeInt(-2) // x
+            .encodeByteString(xBytes)
+            .encodeNegativeInt(-3) // y
+            .encodeByteString(yBytes)
+            
+        return encoder.toByteArray()
+    }
+
+    /**
+     * Generate an HMAC-SHA256 key in the Keystore for the hmac-secret extension.
+     * This key is NOT biometrically gated because the primary ECDSA key handles gating.
+     * We don't want to prompt the user twice.
+     * 
+     * @param credentialId The unique ID of the FIDO credential.
+     */
+    fun generateHmacSecretKey(credentialId: ByteArray) {
+        val alias = "hmac_secret_${java.util.Base64.getEncoder().withoutPadding().encodeToString(credentialId)}"
+        val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_HMAC_SHA256, KEYSTORE_PROVIDER)
+        val builder = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
+            .setUserAuthenticationRequired(false) // Primary ECDSA key handles auth
+            
+        keyGenerator.init(builder.build())
+        keyGenerator.generateKey()
+    }
+
+    /**
+     * Compute HMAC-SHA-256 over the provided salt using the Keystore-backed HMAC key.
+     * This prevents the HMAC secret from ever existing in Android's JVM heap.
+     * 
+     * @param credentialId The unique ID of the FIDO credential.
+     * @param salt The decrypted salt from the pinUvAuthProtocol.
+     */
+    fun computeHmacSecret(credentialId: ByteArray, salt: ByteArray): ByteArray {
+        val alias = "hmac_secret_${java.util.Base64.getEncoder().withoutPadding().encodeToString(credentialId)}"
+        val ks = KeyStore.getInstance(KEYSTORE_PROVIDER)
+        ks.load(null)
+        val secretKey = ks.getKey(alias, null) as SecretKey
+        
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(secretKey)
+        return mac.doFinal(salt)
     }
     
     private fun to32ByteArray(value: java.math.BigInteger): ByteArray {
