@@ -63,20 +63,35 @@ namespace Phone2PC.Desktop
                     return;
                 }
 
-                Console.WriteLine($"Connected to {device.Name}. Discovering GATT services...");
+                Console.WriteLine($"Connected to {device.Name}. Discovering FIDO service...");
                 
                 var gattServicesResult = await device.GetGattServicesAsync(BluetoothCacheMode.Uncached);
-                if (gattServicesResult.Status == Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
+                if (gattServicesResult.Status != Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
                 {
-                    Console.WriteLine($"Found {gattServicesResult.Services.Count} services:");
-                    foreach (var service in gattServicesResult.Services)
+                    Console.WriteLine($"Failed to discover services. Status: {gattServicesResult.Status}");
+                    return;
+                }
+
+                var fidoService = gattServicesResult.Services.FirstOrDefault(s => s.Uuid == FidoServiceUuid);
+                if (fidoService == null)
+                {
+                    Console.WriteLine("FIDO Service not found on this device.");
+                    return;
+                }
+
+                Console.WriteLine("FIDO Service found. Discovering characteristics...");
+                var characteristicsResult = await fidoService.GetCharacteristicsAsync(BluetoothCacheMode.Uncached);
+                
+                if (characteristicsResult.Status == Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
+                {
+                    foreach (var c in characteristicsResult.Characteristics)
                     {
-                        Console.WriteLine($" - Service UUID: {service.Uuid}");
+                        Console.WriteLine($" - Found Characteristic UUID: {c.Uuid} (Properties: {c.CharacteristicProperties})");
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"Failed to discover services. Status: {gattServicesResult.Status}");
+                    Console.WriteLine($"Failed to discover characteristics. Status: {characteristicsResult.Status}");
                 }
             }
             catch (Exception ex)
