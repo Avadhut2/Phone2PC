@@ -9,8 +9,8 @@ namespace Phone2PC.Desktop
     public class BleScanner
     {
         private BluetoothLEAdvertisementWatcher _watcher;
-        // The FIDO2 Service UUID is 0xFFFD
-        private static readonly Guid FidoServiceUuid = Guid.Parse("0000FFFD-0000-1000-8000-00805F9B34FB");
+        // The Phone2PC Service UUID is 0xFFFE (used instead of FFFD to avoid Windows Hello locks)
+        private static readonly Guid FidoServiceUuid = Guid.Parse("0000FFFE-0000-1000-8000-00805F9B34FB");
 
         public BleScanner()
         {
@@ -72,24 +72,37 @@ namespace Phone2PC.Desktop
                     return;
                 }
 
-                foreach (var service in gattServicesResult.Services)
+                var targetService = gattServicesResult.Services.FirstOrDefault(s => s.Uuid == FidoServiceUuid);
+                if (targetService == null)
                 {
-                    Console.WriteLine($"\nTrying Service: {service.Uuid}");
-                    var accessStatus = await service.RequestAccessAsync();
-                    Console.WriteLine($" Access Status: {accessStatus}");
+                    Console.WriteLine("Phone2PC Service not found on this device.");
+                    return;
+                }
 
-                    if (accessStatus == Windows.Devices.Enumeration.DeviceAccessStatus.Allowed)
+                Console.WriteLine("Phone2PC Service found. Requesting access...");
+                var accessStatus = await targetService.RequestAccessAsync();
+                Console.WriteLine($"Access Status: {accessStatus}");
+
+                if (accessStatus != Windows.Devices.Enumeration.DeviceAccessStatus.Allowed)
+                {
+                    Console.WriteLine("Cannot access the service. Access was not allowed.");
+                    return;
+                }
+
+                Console.WriteLine("Discovering characteristics...");
+                var charResult = await targetService.GetCharacteristicsAsync(BluetoothCacheMode.Uncached);
+                
+                if (charResult.Status == Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
+                {
+                    Console.WriteLine($"Found {charResult.Characteristics.Count} characteristics.");
+                    foreach (var c in charResult.Characteristics)
                     {
-                        var charResult = await service.GetCharacteristicsAsync(BluetoothCacheMode.Uncached);
-                        if (charResult.Status == Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
-                        {
-                            Console.WriteLine($" Found {charResult.Characteristics.Count} characteristics.");
-                        }
-                        else
-                        {
-                            Console.WriteLine($" Failed to discover characteristics. Status: {charResult.Status}");
-                        }
+                        Console.WriteLine($" - UUID: {c.Uuid} (Properties: {c.CharacteristicProperties})");
                     }
+                }
+                else
+                {
+                    Console.WriteLine($"Failed to discover characteristics. Status: {charResult.Status}");
                 }
             }
             catch (Exception ex)

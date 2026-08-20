@@ -11,8 +11,8 @@ import java.util.UUID
  */
 object FidoBleUuids {
 
-    /** FIDO BLE Service UUID (0xFFFD). */
-    val SERVICE: UUID = UUID.fromString("0000FFFD-0000-1000-8000-00805F9B34FB")
+    /** Phone2PC Proprietary BLE Service UUID (0xFFFE). */
+    val SERVICE: UUID = UUID.fromString("0000FFFE-0000-1000-8000-00805F9B34FB")
     val SERVICE_PARCEL: ParcelUuid = ParcelUuid(SERVICE)
 
     /** fidoControlPoint — Write. The client writes CTAP2 commands here. */
