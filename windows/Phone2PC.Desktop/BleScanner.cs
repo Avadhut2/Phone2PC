@@ -11,16 +11,16 @@ namespace Phone2PC.Desktop
         private BluetoothLEAdvertisementWatcher _watcher;
         // The FIDO2 Service UUID is 0xFFFD
         private static readonly Guid FidoServiceUuid = Guid.Parse("0000FFFD-0000-1000-8000-00805F9B34FB");
-        
+
         public BleScanner()
         {
             _watcher = new BluetoothLEAdvertisementWatcher();
-            
+
             // Filter only devices advertising the FIDO2 service
             var filter = new BluetoothLEAdvertisementFilter();
             filter.Advertisement.ServiceUuids.Add(FidoServiceUuid);
             _watcher.AdvertisementFilter = filter;
-            
+
             _watcher.Received += OnAdvertisementReceived;
         }
 
@@ -40,10 +40,10 @@ namespace Phone2PC.Desktop
         {
             // Stop watching once we find a FIDO2 device to prevent multiple connection attempts
             _watcher.Stop();
-            
+
             string deviceName = args.Advertisement.LocalName;
             if (string.IsNullOrEmpty(deviceName)) deviceName = "Unknown FIDO2 Device";
-            
+
             Console.WriteLine($"\nFound FIDO2 Device: {deviceName} (Address: {args.BluetoothAddress:X})");
             Console.WriteLine($"RSSI: {args.RawSignalStrengthInDBm} dBm");
 
@@ -56,14 +56,14 @@ namespace Phone2PC.Desktop
             {
                 Console.WriteLine("Connecting...");
                 using var device = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress);
-                
+
                 if (device == null)
                 {
                     Console.WriteLine("Failed to connect to device.");
                     return;
                 }
 
-                Console.WriteLine($"Connected to {device.Name}. Discovering FIDO service...");
+                Console.WriteLine($"Connected to {device.Name}. Discovering all services...");
                 
                 var gattServicesResult = await device.GetGattServicesAsync(BluetoothCacheMode.Uncached);
                 if (gattServicesResult.Status != Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
@@ -72,26 +72,24 @@ namespace Phone2PC.Desktop
                     return;
                 }
 
-                var fidoService = gattServicesResult.Services.FirstOrDefault(s => s.Uuid == FidoServiceUuid);
-                if (fidoService == null)
+                foreach (var service in gattServicesResult.Services)
                 {
-                    Console.WriteLine("FIDO Service not found on this device.");
-                    return;
-                }
+                    Console.WriteLine($"\nTrying Service: {service.Uuid}");
+                    var accessStatus = await service.RequestAccessAsync();
+                    Console.WriteLine($" Access Status: {accessStatus}");
 
-                Console.WriteLine("FIDO Service found. Discovering characteristics...");
-                var characteristicsResult = await fidoService.GetCharacteristicsAsync(BluetoothCacheMode.Uncached);
-                
-                if (characteristicsResult.Status == Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
-                {
-                    foreach (var c in characteristicsResult.Characteristics)
+                    if (accessStatus == Windows.Devices.Enumeration.DeviceAccessStatus.Allowed)
                     {
-                        Console.WriteLine($" - Found Characteristic UUID: {c.Uuid} (Properties: {c.CharacteristicProperties})");
+                        var charResult = await service.GetCharacteristicsAsync(BluetoothCacheMode.Uncached);
+                        if (charResult.Status == Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
+                        {
+                            Console.WriteLine($" Found {charResult.Characteristics.Count} characteristics.");
+                        }
+                        else
+                        {
+                            Console.WriteLine($" Failed to discover characteristics. Status: {charResult.Status}");
+                        }
                     }
-                }
-                else
-                {
-                    Console.WriteLine($"Failed to discover characteristics. Status: {characteristicsResult.Status}");
                 }
             }
             catch (Exception ex)
