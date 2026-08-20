@@ -4,15 +4,19 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 
 /**
  * Unit tests for [CtapRouter].
  * Tests command routing, error handling, GetInfo response, and MakeCredential parsing.
  */
+@RunWith(RobolectricTestRunner::class)
 class CtapRouterTest {
 
-    // Router without biometric handler — only tests that don't need real Keystore
-    private val router = CtapRouter()
+    // Router with Robolectric-provided context — only tests that don't need real Keystore
+    private val router = CtapRouter(RuntimeEnvironment.getApplication())
 
     // --- Command routing ---
 
